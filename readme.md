@@ -1,6 +1,7 @@
 ### Tree Instance Propagation to Original Plot Point Cloud 
 
-This repo contains two scripts aimed at removing points present in tree instances from original plot point clouds using distance-based thresholding.
+This repo contains two scripts aimed at removing points present in tree instances from original plot point clouds using distance-based thresholding.  
+Given a set of segmented tree point clouds, and the original, unedited plot point cloud, the segmented tree points will be propagated to the plot point cloud and removed. 
 
 ---
 

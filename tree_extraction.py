@@ -4,6 +4,8 @@ import open3d as o3d
 import numpy as np
 import laspy
 import argparse
+import json
+import gc
 
 def get_file_extension(file_path):
     """
@@ -41,55 +43,115 @@ def read_las_np(pc_path, laz_backend=LAZ_BACKEND):
     points = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
     return points, point_cloud
 
+import gc
+
 def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
-    ext = get_file_extension(plot_file)
+    # Resume from previous state if it exists
+    if os.path.exists("mask_plot.npy"):
+        print("Resuming from saved mask...")
+        plot_mask = np.load("mask_plot.npy")
+    else:
+        plot_points, _ = read_las_np(plot_file)
+        plot_mask = np.ones(plot_points.shape[0], dtype=bool)
+
+    if os.path.exists("processed_trees.json"):
+        with open("processed_trees.json", "r") as f:
+            processed_trees = json.load(f)
+    else:
+        processed_trees = []
+
+    # Get tree files
+    ext = get_file_extension(trees_folder)
+    tree_files = glob.glob(os.path.join(trees_folder, "*" + ext))
+
+    # Load plot once
     plot_points, plot_cloud = read_las_np(plot_file)
     plot_o3d = o3d.geometry.PointCloud()
     plot_o3d.points = o3d.utility.Vector3dVector(plot_points)
 
-    plot_mask = np.ones(plot_points.shape[0], dtype=bool)
-    ext = get_file_extension(trees_folder)
-    tree_files = glob.glob(os.path.join(trees_folder, "*" + ext))
-    
     for i, tree in enumerate(tree_files):
-        print(f"Processing {tree} ({i+1}/{len(tree_files)})")
-        tree_mask = np.zeros(plot_points.shape[0], dtype=bool)
-        ext = get_file_extension(tree)
-        tree_points, tree_cloud = read_las_np(tree)       
-        tree_o3d = o3d.geometry.PointCloud()
-        tree_o3d.points = o3d.utility.Vector3dVector(tree_points)
-        
-        # Get plot points in the tree's bounding box (with a small buffer)
-        tree_bbox = tree_o3d.get_axis_aligned_bounding_box()
-        buffer = np.array([distance_th + 0.01, distance_th + 0.01, distance_th + 0.01])
-        tree_bbox.max_bound = tree_bbox.max_bound + buffer
-        tree_bbox.min_bound = tree_bbox.min_bound - buffer
+        print(f"\n=== Processing {tree} ({i+1}/{len(tree_files)}) ===")  # Always show
 
-        inliers_indices = tree_bbox.get_point_indices_within_bounding_box(plot_o3d.points)
-        inliers_pc = plot_o3d.select_by_index(inliers_indices, invert=False)
-        
-        if len(inliers_pc.points) != 0:
-            # For points in the bounding box, compute distances and update the mask
-            distances = inliers_pc.compute_point_cloud_distance(tree_o3d)
-            distances = np.asarray(distances)
+        if tree in processed_trees:
+            print(f"Skipping already processed {tree}")
+            continue
+
+        try:
+            tree_mask = np.zeros(plot_points.shape[0], dtype=bool)
+            tree_points, tree_cloud = read_las_np(tree)
+
+            if len(tree_points) == 0:
+                print(f"⚠️  Tree {tree} has no points, skipping.")
+                processed_trees.append(tree)
+                continue
+
+            tree_o3d = o3d.geometry.PointCloud()
+            tree_o3d.points = o3d.utility.Vector3dVector(tree_points)
+
+            tree_bbox = tree_o3d.get_axis_aligned_bounding_box()
+            buffer = np.array([distance_th + 0.01] * 3)
+            tree_bbox.max_bound = tree_bbox.max_bound + buffer
+            tree_bbox.min_bound = tree_bbox.min_bound - buffer
+
+            inliers_indices = tree_bbox.get_point_indices_within_bounding_box(plot_o3d.points)
+            inliers_pc = plot_o3d.select_by_index(inliers_indices)
+
+            print(f" → Tree points: {len(tree_points)} | Plot inliers: {len(inliers_pc.points)}")
+
+            if len(inliers_pc.points) == 0:
+                print(f"⚠️  No inlier points in plot, skipping distance computation.")
+                processed_trees.append(tree)
+                continue
+
+            distances = np.asarray(inliers_pc.compute_point_cloud_distance(tree_o3d))
             tree_ind = np.where(distances < distance_th)[0]
-            # Tree indices in the plot cloud
             inliers_indices = np.asarray(inliers_indices)
             plot_indices_tree = inliers_indices[tree_ind]
-            # Write tree to seperate folder
+
+            if len(plot_indices_tree) == 0:
+                print(f"⚠️  No nearby points found in plot for this tree.")
+                processed_trees.append(tree)
+                continue
+
             tree_mask[plot_indices_tree] = True
             tree_mask_noduplicates = tree_mask & plot_mask
-            tree_points = plot_cloud.points[tree_mask_noduplicates].copy()
+            tree_points_out = plot_cloud.points[tree_mask_noduplicates].copy()
+
+            if len(tree_points_out) == 0:
+                print(f"⚠️  Output point cloud is empty, skipping write.")
+                processed_trees.append(tree)
+                continue
+
             tree_output_file = laspy.LasData(plot_cloud.header)
-            tree_output_file.points = tree_points
+            tree_output_file.points = tree_points_out
             tree_output_filename = os.path.basename(tree)[:-4] + "_propagated.las"
             tree_output_path = os.path.join(opath_folder, tree_output_filename)
             tree_output_file.write(tree_output_path)
-            # Update plot mask
+
+            # Update mask
             plot_mask[plot_indices_tree] = False
 
+        except Exception as e:
+            print(f"❌ Error processing {tree}: {e}")
+            print("Skipping this tree and continuing...")
+
+        # Save progress
+        np.save("mask_plot.npy", plot_mask)
+        if tree not in processed_trees:
+            processed_trees.append(tree)
+        with open("processed_trees.json", "w") as f:
+            json.dump(processed_trees, f)
+
+        # Cleanup
+        for var in ['tree_mask', 'tree_points', 'tree_cloud', 'tree_o3d', 'tree_bbox', 'inliers_pc', 'tree_points_out']:
+            if var in locals():
+                del locals()[var]
+        gc.collect()
 
     return plot_mask
+
+
+
 
 def segment_plot(plot_file, mask, opath):
     ext = get_file_extension(plot_file)

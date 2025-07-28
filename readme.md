@@ -5,7 +5,7 @@ Given a set of segmented tree point clouds, and the original, unedited plot poin
 
 ---
 
-#### 📄 `treeseg_propagation.py`
+#### 📄 `propagate_predictions.py`
 
 This script **creates a propagated point cloud** (i.e., the original plot point cloud without the segmented trees).
 

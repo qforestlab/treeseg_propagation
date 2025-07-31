@@ -45,7 +45,7 @@ def read_las_np(pc_path, laz_backend=LAZ_BACKEND):
 
 import gc
 
-def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
+def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th):
     # Resume from previous state if it exists
     if os.path.exists("mask_plot.npy"):
         print("Resuming from saved mask...")
@@ -81,7 +81,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
             tree_points, tree_cloud = read_las_np(tree)
 
             if len(tree_points) == 0:
-                print(f"⚠️  Tree {tree} has no points, skipping.")
+                print(f"Tree {tree} has no points, skipping.")
                 processed_trees.append(tree)
                 continue
 
@@ -99,7 +99,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
             print(f" → Tree points: {len(tree_points)} | Plot inliers: {len(inliers_pc.points)}")
 
             if len(inliers_pc.points) == 0:
-                print(f"⚠️  No inlier points in plot, skipping distance computation.")
+                print(f"No inlier points in plot, skipping distance computation.")
                 processed_trees.append(tree)
                 continue
 
@@ -109,7 +109,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
             plot_indices_tree = inliers_indices[tree_ind]
 
             if len(plot_indices_tree) == 0:
-                print(f"⚠️  No nearby points found in plot for this tree.")
+                print(f"No nearby points found in plot for this tree.")
                 processed_trees.append(tree)
                 continue
 
@@ -118,7 +118,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
             tree_points_out = plot_cloud.points[tree_mask_noduplicates].copy()
 
             if len(tree_points_out) == 0:
-                print(f"⚠️  Output point cloud is empty, skipping write.")
+                print(f"Output point cloud is empty, skipping write.")
                 processed_trees.append(tree)
                 continue
 
@@ -132,7 +132,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
             plot_mask[plot_indices_tree] = False
 
         except Exception as e:
-            print(f"❌ Error processing {tree}: {e}")
+            print(f"Error processing {tree}: {e}")
             print("Skipping this tree and continuing...")
 
         # Save progress

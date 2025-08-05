@@ -32,18 +32,34 @@ def get_laz_backend():
 
 LAZ_BACKEND = get_laz_backend()
 
-def read_las_np(pc_path, laz_backend=LAZ_BACKEND):
+def read_pc_np(pc_path, laz_backend=LAZ_BACKEND):
     ext = get_file_extension(pc_path)
     if ext == ".las":
         point_cloud = laspy.read(pc_path)
+        points = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).T
+        return points, point_cloud
     elif ext == ".laz":
         point_cloud = laspy.read(pc_path, laz_backend=laz_backend)
+        points = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).T
+        return points, point_cloud
+    elif ext == ".ply":
+        pcd = o3d.io.read_point_cloud(pc_path)
+        points = np.asarray(pcd.points)
+        # Optional: convert attributes like color to fields
+        attributes = {
+            "x": points[:, 0],
+            "y": points[:, 1],
+            "z": points[:, 2]
+        }
+        class FakeLas:
+            def __init__(self, attrs):
+                for k, v in attrs.items():
+                    setattr(self, k, v)
+
+        point_cloud = FakeLas(attributes)
+        return points, point_cloud
     else:
         raise ValueError(f"Unsupported file extension: {ext} for file {pc_path}")
-    points = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
-    return points, point_cloud
-
-import gc
 
 def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
     # Resume from previous state if it exists
@@ -51,7 +67,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
         print("Resuming from saved mask...")
         plot_mask = np.load("mask_plot.npy")
     else:
-        plot_points, _ = read_las_np(plot_file)
+        plot_points, _ = read_pc_np(plot_file)
         plot_mask = np.ones(plot_points.shape[0], dtype=bool)
 
     if os.path.exists("processed_trees.json"):
@@ -65,7 +81,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
     tree_files = glob.glob(os.path.join(trees_folder, "*" + ext))
 
     # Load plot once
-    plot_points, plot_cloud = read_las_np(plot_file)
+    plot_points, plot_cloud = read_pc_np(plot_file)
     plot_o3d = o3d.geometry.PointCloud()
     plot_o3d.points = o3d.utility.Vector3dVector(plot_points)
 
@@ -78,7 +94,7 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
 
         try:
             tree_mask = np.zeros(plot_points.shape[0], dtype=bool)
-            tree_points, tree_cloud = read_las_np(tree)
+            tree_points, tree_cloud = read_pc_np(tree)
 
             if len(tree_points) == 0:
                 print(f"⚠️  Tree {tree} has no points, skipping.")
@@ -150,12 +166,9 @@ def get_plot_mask(plot_file, trees_folder, opath_folder, distance_th=0.01):
 
     return plot_mask
 
-
-
-
 def segment_plot(plot_file, mask, opath):
     ext = get_file_extension(plot_file)
-    plot_points, plot_cloud = read_las_np(plot_file)
+    plot_points, plot_cloud = read_pc_np(plot_file)
     mask = np.array(mask, dtype=bool)
     plot_points_left = plot_cloud.points[mask].copy()
     output_file = laspy.LasData(plot_cloud.header)
@@ -219,4 +232,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

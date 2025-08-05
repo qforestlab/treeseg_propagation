@@ -46,17 +46,11 @@ def read_pc_np(pc_path, laz_backend=LAZ_BACKEND):
         pcd = o3d.io.read_point_cloud(pc_path)
         points = np.asarray(pcd.points)
         # Optional: convert attributes like color to fields
-        attributes = {
-            "x": points[:, 0],
-            "y": points[:, 1],
-            "z": points[:, 2]
-        }
-        class FakeLas:
-            def __init__(self, attrs):
-                for k, v in attrs.items():
-                    setattr(self, k, v)
-
-        point_cloud = FakeLas(attributes)
+        header = laspy.LasHeader(point_format=0, version="1.2")
+        point_cloud = laspy.LasData(header)
+        point_cloud.x = points[:, 0]
+        point_cloud.y = points[:, 1]
+        point_cloud.z = points[:, 2]
         return points, point_cloud
     else:
         raise ValueError(f"Unsupported file extension: {ext} for file {pc_path}")
